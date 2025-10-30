@@ -40,14 +40,13 @@
 
     // --- СЕРВИСНЫЙ СЛОЙ ДЛЯ GEMINI API ---
 
-    // Исправлено: используется new GoogleGenAI({ apiKey })
     const uploadFileService = async (apiKey, file) => {
       const ai = new window.GoogleGenAI({ apiKey });
       const result = await ai.files.upload({ file });
-      return result.file;
+      // ИСПРАВЛЕНО: Возвращаем весь объект result, так как он и является метаданными файла.
+      return result;
     };
 
-    // Исправлено: используется new GoogleGenAI({ apiKey }) и ai.models.generateContent
     const transcribeAudioFileService = async (apiKey, file) => {
       const ai = new window.GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
@@ -65,7 +64,6 @@
       return response.text;
     };
     
-    // Исправлено: используется new GoogleGenAI({ apiKey })
     const startLiveTranscriptionService = async (apiKey, onTranscriptionUpdate, onError) => {
         const ai = new window.GoogleGenAI({ apiKey });
 
