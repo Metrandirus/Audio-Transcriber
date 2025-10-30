@@ -1,0 +1,5 @@
+
+{
+  "name": "Audio Transcriber",
+  "description": "An application to transcribe audio files using the Gemini API. Simply upload an audio file and get the text transcription."
+}
