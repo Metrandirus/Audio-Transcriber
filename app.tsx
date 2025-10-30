@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { transcribeAudio } from './services/geminiService';
 
@@ -9,7 +8,6 @@ const fileToBase64 = (file: File): Promise<string> => {
         reader.readAsDataURL(file);
         reader.onload = () => {
             const result = reader.result as string;
-            // result is "data:audio/mpeg;base64,..." - we want only the part after the comma
             const base64Data = result.split(',')[1];
             resolve(base64Data);
         };
@@ -17,25 +15,22 @@ const fileToBase64 = (file: File): Promise<string> => {
     });
 };
 
-// --- SVG Icon Components ---
+// --- SVG Icon Components (unchanged) ---
 const UploadIcon: React.FC = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 15l-4-4m4 4l4-4m-4-4v12" />
     </svg>
 );
-
 const AudioFileIcon: React.FC = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 6l12-3" />
     </svg>
 );
-
 const CopyIcon: React.FC = () => (
     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
     </svg>
 );
-
 const Loader: React.FC = () => (
     <div className="flex justify-center items-center space-x-2">
       <svg className="animate-spin h-6 w-6 text-slate-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -46,8 +41,7 @@ const Loader: React.FC = () => (
     </div>
 );
 
-
-// --- UI Components defined outside App to prevent re-creation on re-renders ---
+// --- UI Components (unchanged) ---
 const Header: React.FC = () => (
   <header className="text-center py-8">
     <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
@@ -58,59 +52,21 @@ const Header: React.FC = () => (
     </p>
   </header>
 );
-
-interface FileUploaderProps {
-  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  audioFile: File | null;
-}
-
+interface FileUploaderProps { onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void; audioFile: File | null; }
 const FileUploader: React.FC<FileUploaderProps> = ({ onFileChange, audioFile }) => (
     <div className="w-full max-w-2xl mx-auto">
         <label htmlFor="audio-upload" className="relative block w-full p-8 text-center border-2 border-dashed border-slate-700 rounded-lg hover:border-indigo-500 transition-colors duration-300 cursor-pointer bg-slate-800/50">
-            <div className="flex flex-col items-center justify-center">
-                <UploadIcon />
-                <p className="mt-2 text-sm text-slate-400">
-                    <span className="font-semibold text-indigo-400">Нажмите, чтобы выбрать</span> или перетащите аудиофайл
-                </p>
-                <p className="text-xs text-slate-500 mt-1">Поддерживаются любые аудиоформаты</p>
-            </div>
+            <div className="flex flex-col items-center justify-center"> <UploadIcon /> <p className="mt-2 text-sm text-slate-400"> <span className="font-semibold text-indigo-400">Нажмите, чтобы выбрать</span> или перетащите аудиофайл </p> <p className="text-xs text-slate-500 mt-1">Поддерживаются любые аудиоформаты</p> </div>
             <input id="audio-upload" name="audio-upload" type="file" className="sr-only" accept="audio/*" onChange={onFileChange} />
         </label>
-        {audioFile && (
-            <div className="mt-4 flex items-center justify-center bg-slate-800 p-3 rounded-lg">
-                <AudioFileIcon />
-                <p className="ml-3 text-slate-300 font-medium truncate" title={audioFile.name}>
-                    <span className="text-slate-500 mr-2">Выбранный файл:</span>{audioFile.name}
-                </p>
-            </div>
-        )}
+        {audioFile && ( <div className="mt-4 flex items-center justify-center bg-slate-800 p-3 rounded-lg"> <AudioFileIcon /> <p className="ml-3 text-slate-300 font-medium truncate" title={audioFile.name}> <span className="text-slate-500 mr-2">Выбранный файл:</span>{audioFile.name} </p> </div> )}
     </div>
 );
-
-
-interface TranscriptionDisplayProps {
-  transcription: string;
-  isLoading: boolean;
-  error: string | null;
-}
-
+interface TranscriptionDisplayProps { transcription: string; isLoading: boolean; error: string | null; }
 const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({ transcription, isLoading, error }) => {
     const [copied, setCopied] = useState(false);
-
-    const handleCopy = () => {
-        if (transcription) {
-            navigator.clipboard.writeText(transcription);
-            setCopied(true);
-        }
-    };
-
-    useEffect(() => {
-        if (copied) {
-            const timer = setTimeout(() => setCopied(false), 2000);
-            return () => clearTimeout(timer);
-        }
-    }, [copied]);
-
+    const handleCopy = () => { if (transcription) { navigator.clipboard.writeText(transcription); setCopied(true); } };
+    useEffect(() => { if (copied) { const timer = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(timer); } }, [copied]);
     return (
         <div className="w-full max-w-2xl mx-auto mt-8">
             <div className="relative bg-slate-800 rounded-lg shadow-inner min-h-[12rem] p-6 text-slate-300 whitespace-pre-wrap leading-relaxed">
@@ -118,13 +74,8 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({ transcripti
                 {error && <p className="text-red-400">{error}</p>}
                 {!isLoading && !error && !transcription && <p className="text-slate-500">Ваша расшифровка появится здесь...</p>}
                 {!isLoading && !error && transcription && <p>{transcription}</p>}
-
                 {transcription && !isLoading && (
-                    <button 
-                        onClick={handleCopy}
-                        className="absolute top-3 right-3 flex items-center px-3 py-1 bg-slate-700 hover:bg-indigo-600 rounded-md text-xs font-medium text-slate-300 hover:text-white transition-all duration-200"
-                        aria-label="Copy transcription to clipboard"
-                    >
+                    <button onClick={handleCopy} className="absolute top-3 right-3 flex items-center px-3 py-1 bg-slate-700 hover:bg-indigo-600 rounded-md text-xs font-medium text-slate-300 hover:text-white transition-all duration-200" aria-label="Copy transcription to clipboard">
                         {copied ? 'Скопировано!' : <><CopyIcon /> <span className="ml-2">Копировать</span></>}
                     </button>
                 )}
@@ -133,19 +84,82 @@ const TranscriptionDisplay: React.FC<TranscriptionDisplayProps> = ({ transcripti
     );
 };
 
+// --- New Component for API Key Input ---
+interface ApiKeyManagerProps {
+  onKeySubmit: (key: string) => void;
+}
+const ApiKeyManager: React.FC<ApiKeyManagerProps> = ({ onKeySubmit }) => {
+  const [keyInput, setKeyInput] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (keyInput.trim()) {
+      onKeySubmit(keyInput.trim());
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900 bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50">
+      <div className="bg-slate-800 rounded-lg shadow-2xl p-8 max-w-md w-full">
+        <h2 className="text-2xl font-bold text-white mb-4">Требуется API ключ Gemini</h2>
+        <p className="text-slate-400 mb-6">
+          Чтобы использовать приложение, введите ваш API ключ от Google AI Studio. Он будет сохранен только в вашем браузере.
+        </p>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={keyInput}
+            onChange={(e) => setKeyInput(e.target.value)}
+            placeholder="Введите ваш API ключ..."
+            className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <button
+            type="submit"
+            className="w-full mt-4 px-6 py-3 font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 disabled:bg-slate-700 transition-colors"
+            disabled={!keyInput.trim()}
+          >
+            Сохранить и продолжить
+          </button>
+        </form>
+         <p className="text-xs text-slate-500 mt-4 text-center">
+            Нет ключа?{' '}
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                Получить ключ здесь
+            </a>
+        </p>
+      </div>
+    </div>
+  );
+};
 
 // --- Main App Component ---
 export default function App() {
+    const [apiKey, setApiKey] = useState<string>('');
+    const [isKeySaved, setIsKeySaved] = useState<boolean>(false);
     const [audioFile, setAudioFile] = useState<File | null>(null);
     const [transcription, setTranscription] = useState<string>('');
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [error, setError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
+    useEffect(() => {
+        const savedKey = localStorage.getItem('gemini-api-key');
+        if (savedKey) {
+            setApiKey(savedKey);
+            setIsKeySaved(true);
+        }
+    }, []);
+
+    const handleKeySubmit = (key: string) => {
+        localStorage.setItem('gemini-api-key', key);
+        setApiKey(key);
+        setIsKeySaved(true);
+    };
+
     const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const file = event.target.files?.[0];
         if (file) {
-            if (file.size > 25 * 1024 * 1024) { // Limit file size to 25MB
+            if (file.size > 25 * 1024 * 1024) {
                 setError("Файл слишком большой. Пожалуйста, выберите файл размером до 25 МБ.");
                 setAudioFile(null);
                  if(fileInputRef.current) fileInputRef.current.value = "";
@@ -162,6 +176,10 @@ export default function App() {
             setError('Пожалуйста, сначала выберите аудиофайл.');
             return;
         }
+        if (!apiKey) {
+            setError('API ключ не найден. Пожалуйста, обновите страницу и введите ключ.');
+            return;
+        }
 
         setIsLoading(true);
         setError(null);
@@ -169,7 +187,7 @@ export default function App() {
 
         try {
             const base64Audio = await fileToBase64(audioFile);
-            const result = await transcribeAudio(base64Audio, audioFile.type);
+            const result = await transcribeAudio(base64Audio, audioFile.type, apiKey);
             setTranscription(result);
         } catch (err) {
             const errorMessage = err instanceof Error ? err.message : 'Произошла непредвиденная ошибка.';
@@ -178,7 +196,11 @@ export default function App() {
         } finally {
             setIsLoading(false);
         }
-    }, [audioFile]);
+    }, [audioFile, apiKey]);
+    
+    if (!isKeySaved) {
+        return <ApiKeyManager onKeySubmit={handleKeySubmit} />;
+    }
 
     return (
         <div className="min-h-screen bg-slate-900 text-white flex flex-col font-sans">
