@@ -1,10 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="ru">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Аудио Транскрибер</title>
+    
+    <!-- 1. Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body {
@@ -12,21 +13,263 @@
         -moz-osx-font-smoothing: grayscale;
       }
     </style>
-  <script type="importmap">
+    
+    <!-- 2. React Libraries from CDN -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    
+    <!-- 3. Babel Standalone to process JSX in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 4. ES Module Shim for using modern imports -->
+    <script async src="https://ga.jspm.io/npm:es-module-shims@1.10.0/dist/es-module-shims.js"></script>
+    <script type="importmap">
 {
   "imports": {
+    "@google/genai": "https://esm.sh/@google/genai",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.28.0",
     "vite": "https://aistudiocdn.com/vite@^7.1.12",
     "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.0"
   }
 }
 </script>
 </head>
-  <body class="bg-slate-900">
+<body class="bg-slate-900">
     <div id="root"></div>
-    <script type="module" src="/src/index.tsx"></script>
-  </body>
+
+    <!-- 5. All application code goes here, processed by Babel -->
+    <script type="text/babel" data-type="module">
+        import { GoogleGenAI } from "@google/genai";
+
+        const { useState, useCallback, useEffect, useRef } = React;
+
+        // --- Gemini Service Logic ---
+        const transcribeAudio = async (base64Audio, mimeType, apiKey) => {
+          if (!apiKey) throw new Error("API Key is required.");
+          const ai = new GoogleGenAI({ apiKey });
+          try {
+            const audioPart = { inlineData: { mimeType, data: base64Audio } };
+            const textPart = { text: "Transcribe this audio file accurately. Provide only the transcribed text." };
+            const response = await ai.models.generateContent({
+              model: 'gemini-2.5-flash',
+              contents: { parts: [audioPart, textPart] },
+            });
+            return response.text;
+          } catch (error) {
+            console.error("Error during transcription:", error);
+            if (error instanceof Error && error.message.includes('API key not valid')) {
+                throw new Error(`Неверный API ключ. Пожалуйста, проверьте его и попробуйте снова.`);
+            }
+            if (error instanceof Error) {
+              throw new Error(`Ошибка Gemini API: ${error.message}`);
+            }
+            throw new Error("Произошла неизвестная ошибка во время транскрибации.");
+          }
+        };
+
+        // --- Helper function ---
+        const fileToBase64 = (file) => {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => {
+                    const result = reader.result;
+                    const base64Data = result.split(',')[1];
+                    resolve(base64Data);
+                };
+                reader.onerror = (error) => reject(error);
+            });
+        };
+        
+        // --- UI & Icon Components ---
+        const UploadIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M12 15l-4-4m4 4l4-4m-4-4v12" />
+            </svg>
+        );
+        const AudioFileIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 6l12-3" />
+            </svg>
+        );
+        const CopyIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+        );
+        const Loader = () => (
+            <div className="flex justify-center items-center space-x-2">
+              <svg className="animate-spin h-6 w-6 text-slate-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="text-slate-400">Транскрибирую...</span>
+            </div>
+        );
+        const Header = () => (
+          <header className="text-center py-8">
+            <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400">
+              Аудио Транскрибер
+            </h1>
+            <p className="mt-3 text-lg text-slate-400 max-w-2xl mx-auto">
+              Загрузите аудиофайл и получите текстовую расшифровку с помощью Gemini.
+            </p>
+          </header>
+        );
+        const FileUploader = ({ onFileChange, audioFile }) => (
+            <div className="w-full max-w-2xl mx-auto">
+                <label htmlFor="audio-upload" className="relative block w-full p-8 text-center border-2 border-dashed border-slate-700 rounded-lg hover:border-indigo-500 transition-colors duration-300 cursor-pointer bg-slate-800/50">
+                    <div className="flex flex-col items-center justify-center"> <UploadIcon /> <p className="mt-2 text-sm text-slate-400"> <span className="font-semibold text-indigo-400">Нажмите, чтобы выбрать</span> или перетащите аудиофайл </p> <p className="text-xs text-slate-500 mt-1">Поддерживаются любые аудиоформаты</p> </div>
+                    <input id="audio-upload" name="audio-upload" type="file" className="sr-only" accept="audio/*" onChange={onFileChange} />
+                </label>
+                {audioFile && ( <div className="mt-4 flex items-center justify-center bg-slate-800 p-3 rounded-lg"> <AudioFileIcon /> <p className="ml-3 text-slate-300 font-medium truncate" title={audioFile.name}> <span className="text-slate-500 mr-2">Выбранный файл:</span>{audioFile.name} </p> </div> )}
+            </div>
+        );
+        const TranscriptionDisplay = ({ transcription, isLoading, error }) => {
+            const [copied, setCopied] = useState(false);
+            const handleCopy = () => { if (transcription) { navigator.clipboard.writeText(transcription); setCopied(true); } };
+            useEffect(() => { if (copied) { const timer = setTimeout(() => setCopied(false), 2000); return () => clearTimeout(timer); } }, [copied]);
+            return (
+                <div className="w-full max-w-2xl mx-auto mt-8">
+                    <div className="relative bg-slate-800 rounded-lg shadow-inner min-h-[12rem] p-6 text-slate-300 whitespace-pre-wrap leading-relaxed">
+                        {isLoading && <div className="absolute inset-0 flex items-center justify-center"><Loader /></div>}
+                        {error && <p className="text-red-400">{error}</p>}
+                        {!isLoading && !error && !transcription && <p className="text-slate-500">Ваша расшифровка появится здесь...</p>}
+                        {!isLoading && !error && transcription && <p>{transcription}</p>}
+                        {transcription && !isLoading && (
+                            <button onClick={handleCopy} className="absolute top-3 right-3 flex items-center px-3 py-1 bg-slate-700 hover:bg-indigo-600 rounded-md text-xs font-medium text-slate-300 hover:text-white transition-all duration-200" aria-label="Copy transcription to clipboard">
+                                {copied ? 'Скопировано!' : <React.Fragment><CopyIcon /> <span className="ml-2">Копировать</span></React.Fragment>}
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+        const ApiKeyManager = ({ onKeySubmit }) => {
+          const [keyInput, setKeyInput] = useState('');
+          const handleSubmit = (e) => {
+            e.preventDefault();
+            if (keyInput.trim()) onKeySubmit(keyInput.trim());
+          };
+          return (
+            <div className="fixed inset-0 bg-slate-900 bg-opacity-80 backdrop-blur-sm flex items-center justify-center z-50">
+              <div className="bg-slate-800 rounded-lg shadow-2xl p-8 max-w-md w-full">
+                <h2 className="text-2xl font-bold text-white mb-4">Требуется API ключ Gemini</h2>
+                <p className="text-slate-400 mb-6">Чтобы использовать приложение, введите ваш API ключ от Google AI Studio. Он будет сохранен только в вашем браузере.</p>
+                <form onSubmit={handleSubmit}>
+                  <input type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)} placeholder="Введите ваш API ключ..." className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <button type="submit" className="w-full mt-4 px-6 py-3 font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-500 disabled:bg-slate-700 transition-colors" disabled={!keyInput.trim()}>
+                    Сохранить и продолжить
+                  </button>
+                </form>
+                 <p className="text-xs text-slate-500 mt-4 text-center">
+                    Нет ключа?{' '}
+                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">
+                        Получить ключ здесь
+                    </a>
+                </p>
+              </div>
+            </div>
+          );
+        };
+
+        // --- Main App Component ---
+        function App() {
+            const [apiKey, setApiKey] = useState('');
+            const [isKeySaved, setIsKeySaved] = useState(false);
+            const [audioFile, setAudioFile] = useState(null);
+            const [transcription, setTranscription] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                const savedKey = localStorage.getItem('gemini-api-key');
+                if (savedKey) {
+                    setApiKey(savedKey);
+                    setIsKeySaved(true);
+                }
+            }, []);
+
+            const handleKeySubmit = (key) => {
+                localStorage.setItem('gemini-api-key', key);
+                setApiKey(key);
+                setIsKeySaved(true);
+            };
+
+            const handleFileChange = (event) => {
+                const file = event.target.files?.[0];
+                if (file) {
+                    if (file.size > 25 * 1024 * 1024) {
+                        setError("Файл слишком большой. Пожалуйста, выберите файл размером до 25 МБ.");
+                        setAudioFile(null);
+                         if(fileInputRef.current) fileInputRef.current.value = "";
+                        return;
+                    }
+                    setAudioFile(file);
+                    setTranscription('');
+                    setError(null);
+                }
+            };
+
+            const handleTranscribe = useCallback(async () => {
+                if (!audioFile) {
+                    setError('Пожалуйста, сначала выберите аудиофайл.');
+                    return;
+                }
+                if (!apiKey) {
+                    setError('API ключ не найден. Пожалуйста, обновите страницу и введите ключ.');
+                    return;
+                }
+                setIsLoading(true);
+                setError(null);
+                setTranscription('');
+                try {
+                    const base64Audio = await fileToBase64(audioFile);
+                    const result = await transcribeAudio(base64Audio, audioFile.type, apiKey);
+                    setTranscription(result);
+                } catch (err) {
+                    const errorMessage = err instanceof Error ? err.message : 'Произошла непредвиденная ошибка.';
+                    setError(`Не удалось транскрибировать аудио: ${errorMessage}`);
+                    console.error(err);
+                } finally {
+                    setIsLoading(false);
+                }
+            }, [audioFile, apiKey]);
+            
+            if (!isKeySaved) {
+                return <ApiKeyManager onKeySubmit={handleKeySubmit} />;
+            }
+
+            return (
+                <div className="min-h-screen bg-slate-900 text-white flex flex-col font-sans">
+                    <main className="flex-grow container mx-auto px-4 pb-32">
+                        <Header />
+                        <FileUploader onFileChange={handleFileChange} audioFile={audioFile} />
+                        <TranscriptionDisplay transcription={transcription} isLoading={isLoading} error={error} />
+                    </main>
+                    <footer className="fixed bottom-0 left-0 right-0 p-4 bg-slate-900/80 backdrop-blur-sm border-t border-slate-800">
+                        <div className="container mx-auto flex justify-center">
+                            <button
+                                onClick={handleTranscribe}
+                                disabled={!audioFile || isLoading}
+                                className="w-full max-w-xs px-6 py-4 text-lg font-semibold text-white bg-indigo-600 rounded-lg shadow-lg hover:bg-indigo-500 disabled:bg-slate-700 disabled:cursor-not-allowed disabled:text-slate-400 transition-all duration-300 transform hover:scale-105 disabled:scale-100 focus:outline-none focus:ring-4 focus:ring-indigo-500 focus:ring-opacity-50"
+                            >
+                                {isLoading ? 'Транскрибирую...' : 'Транскрибировать'}
+                            </button>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // --- Mount the App to the DOM ---
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<App />);
+
+    </script>
+</body>
 </html>
