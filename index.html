@@ -1,365 +1,392 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Транскрибатор Аудио</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body {
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        .pulse {
-            box-shadow: 0 0 0 0 rgba(239, 68, 68, 1);
-            animation: pulse-red 2s infinite;
-        }
-        @keyframes pulse-red {
-            0% {
-                transform: scale(0.95);
-                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
-            }
-            70% {
-                transform: scale(1);
-                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
-            }
-            100% {
-                transform: scale(0.95);
-                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-            }
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Аудио Транскрибатор</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="module">
+    // This makes the ES module available globally for the Babel script
+    import { GoogleGenerativeAI } from "https://esm.run/@google/generative-ai";
+    window.GoogleGenerativeAI = GoogleGenerativeAI;
+  </script>
+  <style>
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .transcription-container {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+    .loader {
+      border-top-color: #3498db;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/"
+  }
+}
+</script>
 </head>
-<body class="bg-slate-900 text-slate-200 min-h-screen flex items-center justify-center p-4">
-    <div id="root" class="w-full max-w-3xl"></div>
+<body class="bg-slate-900 text-slate-200 flex items-center justify-center min-h-screen font-sans">
+  <div id="root"></div>
 
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+    const { GoogleGenerativeAI } = window;
+
+    // --- Gemini Service Logic ---
+    const geminiService = {
+      uploadFile: async (apiKey, file) => {
+        const ai = new GoogleGenerativeAI(apiKey);
+        const response = await ai.files.upload({ file });
+        return response.file;
+      },
+      transcribeAudioFile: async (apiKey, fileUri, mimeType) => {
+        const ai = new GoogleGenerativeAI(apiKey);
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: {
+            parts: [{ 
+              fileData: { 
+                mimeType: mimeType,
+                fileUri: fileUri
+              }
+            }, {
+              text: "Транскрибируй это аудио."
+            }]
+          }
+        });
+        return response.text;
+      },
+      startLiveTranscription: async (apiKey, onTranscriptionUpdate, onError, onComplete) => {
+        const ai = new GoogleGenerativeAI(apiKey);
+        const session = await ai.live.connect({
+          model: 'gemini-2.5-flash-native-audio-preview-09-2025',
+          config: {
+            outputAudioTranscription: {},
+          },
+          callbacks: {
+            onopen: () => console.log('Live session opened.'),
+            onclose: () => onComplete(),
+            onerror: (e) => onError(new Error("Ошибка сессии: " + (e.message || "Неизвестная ошибка"))),
+            onmessage: (msg) => {
+              if (msg.serverContent?.outputTranscription?.text) {
+                onTranscriptionUpdate(msg.serverContent.outputTranscription.text);
+              }
+            },
+          },
+        });
+        return session;
+      }
+    };
     
-    <script type="text/babel" data-type="module">
-        import { GoogleGenAI, Modality } from 'https://aistudiocdn.com/@google/genai@^1.28.0';
+    // --- UI Components ---
+    const Loader = ({ text }) => (
+      <div className="flex flex-col items-center justify-center space-y-4">
+        <div className="loader ease-linear rounded-full border-8 border-t-8 border-gray-200 h-24 w-24"></div>
+        <p className="text-xl text-slate-300">{text}</p>
+      </div>
+    );
 
-        const { useState, useEffect, useRef, StrictMode } = React;
-        const MAX_FILE_SIZE_MB = 200;
-        const MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024;
+    const ApiKeyInput = ({ onKeySubmit }) => {
+      const [apiKey, setApiKey] = useState('');
 
-        // --- Gemini Service Logic (Combined) ---
-
-        // File Upload Logic
-        async function uploadFile(apiKey, file) {
-            const ai = new GoogleGenAI({ apiKey });
-            const formData = new FormData();
-            formData.append('file', file);
-            const response = await ai.files.upload({
-                file: formData,
-                mimeType: file.type,
-                displayName: file.name,
-            });
-            return response.file;
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (apiKey.trim()) {
+          onKeySubmit(apiKey.trim());
         }
+      };
 
-        async function transcribeAudioFile(apiKey, fileUri) {
-            const ai = new GoogleGenAI({ apiKey });
-            const response = await ai.models.generateContent({
-                model: 'gemini-2.5-flash',
-                contents: [{
-                    parts: [{
-                        text: "Транскрибируй это аудио."
-                    }, {
-                        fileData: {
-                            mimeType: 'audio/*',
-                            fileUri: fileUri,
-                        }
-                    }]
-                }],
-            });
-            return response.text;
-        }
+      return (
+        <div className="w-full max-w-md p-8 bg-slate-800 rounded-lg shadow-xl">
+          <h1 className="text-3xl font-bold mb-6 text-center text-white">API Ключ</h1>
+          <p className="text-slate-400 mb-6 text-center">
+            Пожалуйста, введите ваш API ключ от Google AI Studio для начала.
+          </p>
+          <form onSubmit={handleSubmit}>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Введите ваш API ключ..."
+              className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-md focus:outline-none focus:ring-2 focus:ring-sky-500"
+              aria-label="API Key Input"
+            />
+            <button
+              type="submit"
+              disabled={!apiKey.trim()}
+              className="w-full mt-6 bg-sky-600 hover:bg-sky-700 disabled:bg-slate-600 text-white font-bold py-3 rounded-md transition-colors duration-300"
+            >
+              Сохранить и Продолжить
+            </button>
+          </form>
+        </div>
+      );
+    };
 
-        // Live Transcription Logic
-        let liveSessionPromise = null;
-        let mediaStream = null;
-        let inputAudioContext = null;
-        let scriptProcessor = null;
-        let mediaStreamSource = null;
+    const ModeSelector = ({ onSelectMode }) => (
+      <div className="w-full max-w-md p-8 bg-slate-800 rounded-lg shadow-xl text-center">
+        <h1 className="text-3xl font-bold mb-6 text-white">Выберите Режим</h1>
+        <div className="flex flex-col space-y-4">
+          <button
+            onClick={() => onSelectMode('file')}
+            className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300"
+          >
+            Загрузить Файл
+          </button>
+          <button
+            onClick={() => onSelectMode('live')}
+            className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300"
+          >
+            Использовать Микрофон
+          </button>
+        </div>
+      </div>
+    );
+    
+    const FileTranscriber = ({ apiKey, onBack }) => {
+      const [file, setFile] = useState(null);
+      const [transcription, setTranscription] = useState('');
+      const [error, setError] = useState('');
+      const [loadingStep, setLoadingStep] = useState(''); // 'uploading', 'transcribing'
+      const fileInputRef = useRef(null);
 
-        function encode(bytes) {
-            let binary = '';
-            const len = bytes.byteLength;
-            for (let i = 0; i < len; i++) {
-                binary += String.fromCharCode(bytes[i]);
+      const handleFileChange = (e) => {
+        const selectedFile = e.target.files[0];
+        if (selectedFile) {
+            if (selectedFile.size > 200 * 1024 * 1024) { // 200MB limit
+                setError('Файл слишком большой. Максимальный размер - 200 МБ.');
+                setFile(null);
+                return;
             }
-            return btoa(binary);
+            setFile(selectedFile);
+            setError('');
+            setTranscription('');
         }
+      };
+      
+      const handleTranscribe = async () => {
+          if (!file) {
+              setError('Пожалуйста, выберите файл.');
+              return;
+          }
+          setError('');
+          setTranscription('');
+          setLoadingStep('uploading');
+          
+          try {
+              const uploadedFile = await geminiService.uploadFile(apiKey, file);
+              setLoadingStep('transcribing');
+              const result = await geminiService.transcribeAudioFile(apiKey, uploadedFile.uri, uploadedFile.mimeType);
+              setTranscription(result);
+          } catch (err) {
+              console.error(err);
+              setError('Ошибка транскрибации: ' + (err.message || 'Неизвестная ошибка. Проверьте ключ API и консоль.'));
+          } finally {
+              setLoadingStep('');
+          }
+      };
 
-        function createBlob(data) {
-            const l = data.length;
-            const int16 = new Int16Array(l);
-            for (let i = 0; i < l; i++) int16[i] = data[i] * 32768;
-            return { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' };
-        }
+      const triggerFileSelect = () => fileInputRef.current.click();
 
-        async function startLiveTranscription(apiKey, onUpdate, onError) {
-            if (liveSessionPromise) return;
-            const ai = new GoogleGenAI({ apiKey });
-            let currentTranscription = '';
-            liveSessionPromise = ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-09-2025',
-                callbacks: {
-                    onopen: async () => {
-                        try {
-                            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            inputAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                            mediaStreamSource = inputAudioContext.createMediaStreamSource(mediaStream);
-                            scriptProcessor = inputAudioContext.createScriptProcessor(4096, 1, 1);
-                            scriptProcessor.onaudioprocess = (e) => {
-                                const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-                                liveSessionPromise?.then((s) => s.sendRealtimeInput({ media: pcmBlob }));
-                            };
-                            mediaStreamSource.connect(scriptProcessor);
-                            scriptProcessor.connect(inputAudioContext.destination);
-                        } catch (err) { onError(err); stopLiveTranscription(); }
-                    },
-                    onmessage: (msg) => {
-                        if (msg.serverContent?.inputTranscription) currentTranscription += msg.serverContent.inputTranscription.text;
-                        if (msg.serverContent?.turnComplete) {
-                            onUpdate(currentTranscription, true);
-                            currentTranscription = '';
-                        } else {
-                            onUpdate(currentTranscription, false);
-                        }
-                    },
-                    onerror: (e) => { onError(new Error('Ошибка API.')); stopLiveTranscription(); },
-                    onclose: () => {},
-                },
-                config: { responseModalities: [Modality.AUDIO], inputAudioTranscription: {} },
-            });
-            try { await liveSessionPromise; } catch (e) { onError(e); await stopLiveTranscription(); }
-        }
+      return (
+        <div className="w-full max-w-2xl p-8 bg-slate-800 rounded-lg shadow-xl">
+          <button onClick={onBack} className="mb-4 text-sky-400 hover:text-sky-300">&larr; Назад к выбору</button>
+          <h1 className="text-3xl font-bold mb-6 text-center text-white">Транскрибация Файла</h1>
+          
+          <div className="flex flex-col items-center space-y-6">
+            <input type="file" accept="audio/*" onChange={handleFileChange} ref={fileInputRef} className="hidden" />
+            <button onClick={triggerFileSelect} className="w-full max-w-xs bg-slate-600 hover:bg-slate-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
+              {file ? 'Выбрать другой файл' : 'Выбрать аудиофайл'}
+            </button>
+            {file && <p className="text-slate-400">{file.name}</p>}
+            
+            <button onClick={handleTranscribe} disabled={!file || loadingStep} className="w-full max-w-xs bg-sky-600 hover:bg-sky-700 disabled:bg-slate-500 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
+              Транскрибировать
+            </button>
+          </div>
+          
+          {loadingStep && <div className="mt-8"><Loader text={loadingStep === 'uploading' ? 'Загрузка файла...' : 'Транскрибация...'}/></div>}
+          {error && <p className="mt-6 text-center text-red-400 bg-red-900/50 p-3 rounded-md">{error}</p>}
+          {transcription && (
+            <div className="mt-8 p-6 bg-slate-900 rounded-lg">
+              <h2 className="text-2xl font-bold mb-4 text-white">Результат:</h2>
+              <p className="transcription-container text-slate-300">{transcription}</p>
+            </div>
+          )}
+        </div>
+      );
+    };
 
-        async function stopLiveTranscription() {
-            if (liveSessionPromise) {
-                try {
-                    const session = await liveSessionPromise;
-                    session.close();
-                } catch (e) { console.error('Error closing session:', e); } 
-                finally { liveSessionPromise = null; }
+    const LiveTranscriber = ({ apiKey, onBack }) => {
+      const [isRecording, setIsRecording] = useState(false);
+      const [transcription, setTranscription] = useState('');
+      const [error, setError] = useState('');
+      const sessionRef = useRef(null);
+      const streamRef = useRef(null);
+      const audioContextRef = useRef(null);
+      const processorRef = useRef(null);
+      
+      const startRecording = async () => {
+        if (isRecording) return;
+        setError('');
+        setTranscription('');
+        setIsRecording(true);
+
+        try {
+          streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          audioContextRef.current = new AudioContext();
+          const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+          processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+
+          const newSession = await geminiService.startLiveTranscription(
+            apiKey,
+            (textChunk) => {
+              setTranscription(prev => prev + textChunk);
+            },
+            (err) => {
+              setError(err.message);
+              stopRecording();
+            },
+            () => {
+               console.log("Session completed.");
+               stopRecording(false); // Stop without trying to close session again
             }
-            mediaStream?.getTracks().forEach(t => t.stop());
-            mediaStream = null;
-            scriptProcessor?.disconnect();
-            mediaStreamSource?.disconnect();
-            scriptProcessor = mediaStreamSource = null;
-            if (inputAudioContext?.state !== 'closed') {
-                try { await inputAudioContext.close(); } catch (e) {}
-                finally { inputAudioContext = null; }
+          );
+          sessionRef.current = newSession;
+
+          processorRef.current.onaudioprocess = (audioProcessingEvent) => {
+            const inputData = audioProcessingEvent.inputBuffer.getChannelData(0);
+            const int16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+                int16[i] = inputData[i] * 32768;
             }
+            if (sessionRef.current) {
+                sessionRef.current.sendRealtimeInput({ media: { data: btoa(String.fromCharCode(...new Uint8Array(int16.buffer))), mimeType: 'audio/pcm;rate=16000' } });
+            }
+          };
+
+          source.connect(processorRef.current);
+          processorRef.current.connect(audioContextRef.current.destination);
+
+        } catch (err) {
+          setError('Не удалось получить доступ к микрофону. Пожалуйста, разрешите доступ в настройках браузера.');
+          setIsRecording(false);
         }
+      };
+
+      const stopRecording = (shouldCloseSession = true) => {
+        if (!isRecording && !shouldCloseSession) return;
+        setIsRecording(false);
         
-        // --- React Components ---
-
-        function ApiKeyManager({ onKeySubmit }) {
-            const [apiKey, setApiKey] = useState('');
-            const handleSubmit = (e) => { e.preventDefault(); if (apiKey.trim()) onKeySubmit(apiKey.trim()); };
-            return (
-                <div className="bg-slate-800 p-8 rounded-lg shadow-xl w-full max-w-md mx-auto">
-                    <h2 className="text-2xl font-bold text-center text-white mb-6">Введите ваш API ключ Gemini</h2>
-                    <p className="text-slate-400 text-center mb-6">
-                        Ключ можно получить в <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-sky-400 hover:text-sky-300">Google AI Studio</a>.
-                    </p>
-                    <form onSubmit={handleSubmit}>
-                        <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Ваш API ключ" className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-sky-500" />
-                        <button type="submit" className="w-full mt-4 bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-4 rounded-md transition-colors duration-300">Сохранить</button>
-                    </form>
-                </div>
-            );
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
         }
-
-        function FileTranscriber({ apiKey }) {
-            const [file, setFile] = useState(null);
-            const [transcription, setTranscription] = useState('');
-            const [error, setError] = useState('');
-            const [loadingStep, setLoadingStep] = useState(''); // 'uploading', 'transcribing'
-            const fileInputRef = useRef(null);
-
-            const handleFileChange = (e) => {
-                const selectedFile = e.target.files[0];
-                if (!selectedFile) return;
-                if (selectedFile.size > MAX_FILE_SIZE_BYTES) {
-                    setError(`Файл слишком большой. Максимальный размер: ${MAX_FILE_SIZE_MB} МБ.`);
-                    return;
-                }
-                setFile(selectedFile);
-                setError('');
-                setTranscription('');
-            };
-
-            const handleTranscribe = async () => {
-                if (!file) {
-                    setError('Пожалуйста, выберите файл.');
-                    return;
-                }
-                setError('');
-                setTranscription('');
-                try {
-                    setLoadingStep('Загрузка файла...');
-                    const uploadedFile = await uploadFile(apiKey, file);
-                    setLoadingStep('Транскрибация...');
-                    const result = await transcribeAudioFile(apiKey, uploadedFile.uri);
-                    setTranscription(result);
-                } catch (err) {
-                    setError(`Ошибка: ${err.message}. Проверьте ключ API и консоль.`);
-                } finally {
-                    setLoadingStep('');
-                }
-            };
-            
-            return (
-                <div>
-                    <header className="text-center mb-8">
-                        <h1 className="text-3xl sm:text-4xl font-bold text-white">Транскрибатор Файлов</h1>
-                        <p className="text-slate-400 mt-2">Загрузите аудиофайл для получения его текстовой версии.</p>
-                    </header>
-                    <div className="bg-slate-900/70 p-6 rounded-lg border border-slate-700 flex flex-col items-center">
-                        <input type="file" accept="audio/*" onChange={handleFileChange} ref={fileInputRef} className="hidden" />
-                        <button onClick={() => fileInputRef.current.click()} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-2 px-6 rounded-md transition-colors duration-300 mb-4">
-                            {file ? 'Выбрать другой файл' : 'Выберите аудиофайл'}
-                        </button>
-                        {file && <p className="text-slate-400 mb-4">Выбран файл: {file.name}</p>}
-                        <button onClick={handleTranscribe} disabled={!file || loadingStep} className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-md transition-colors duration-300 disabled:bg-slate-500 disabled:cursor-not-allowed">
-                            {loadingStep ? loadingStep : 'Транскрибировать'}
-                        </button>
-                    </div>
-                    {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-md text-center mt-4">{error}</p>}
-                    <div className="mt-6 bg-slate-900/70 border border-slate-700 rounded-lg p-4 sm:p-6 min-h-[250px] text-lg whitespace-pre-wrap">
-                        <h2 className="text-xl font-semibold text-white mb-4 border-b border-slate-700 pb-2">Результат:</h2>
-                        {transcription ? <p className="text-slate-300">{transcription}</p> : <p className="text-slate-500">Текст появится здесь...</p>}
-                    </div>
-                </div>
-            );
+        if (processorRef.current) {
+            processorRef.current.disconnect();
+            processorRef.current = null;
         }
-        
-        function LiveTranscriber({ apiKey }) {
-            const [isRecording, setIsRecording] = useState(false);
-            const [transcription, setTranscription] = useState('');
-            const [history, setHistory] = useState([]);
-            const [error, setError] = useState(null);
-            const transcriptionRef = useRef('');
-
-            const handleUpdate = (text, isFinal) => {
-                transcriptionRef.current = text;
-                if (isFinal && text.trim()) {
-                    setHistory(prev => [...prev, text.trim()]);
-                    transcriptionRef.current = '';
-                    setTranscription('');
-                } else {
-                    setTranscription(text);
-                }
-            };
-
-            const handleError = (err) => {
-                setError(`Ошибка: ${err.message}. Проверьте права доступа к микрофону.`);
-                setIsRecording(false);
-                stopLiveTranscription();
-            };
-
-            const toggleRecording = async () => {
-                if (isRecording) {
-                    await stopLiveTranscription();
-                    setIsRecording(false);
-                    if (transcriptionRef.current.trim()) {
-                        setHistory(prev => [...prev, transcriptionRef.current.trim()]);
-                        transcriptionRef.current = '';
-                        setTranscription('');
-                    }
-                } else {
-                    setError(null); setHistory([]); setTranscription(''); transcriptionRef.current = '';
-                    setIsRecording(true);
-                    await startLiveTranscription(apiKey, handleUpdate, handleError);
-                }
-            };
-
-            useEffect(() => { return () => { stopLiveTranscription(); }; }, []);
-            
-            return (
-                <div>
-                     <header className="text-center mb-8">
-                        <h1 className="text-3xl sm:text-4xl font-bold text-white">Транскрибатор в реальном времени</h1>
-                        <p className="text-slate-400 mt-2">Говорите в микрофон для получения текста.</p>
-                    </header>
-                    <div className="flex flex-col items-center justify-center mb-6">
-                        <button onClick={toggleRecording} className={`flex items-center justify-center w-24 h-24 rounded-full text-white font-semibold shadow-lg transition-all duration-300 transform hover:scale-105 ${isRecording ? 'bg-red-600 pulse' : 'bg-green-600 hover:bg-green-700'}`}>
-                          {isRecording ? 'Стоп' : 'Старт'}
-                        </button>
-                    </div>
-                    {error && <p className="text-red-400 bg-red-900/50 p-3 rounded-md text-center mb-4">{error}</p>}
-                    <div className="mt-6 bg-slate-900/70 border border-slate-700 rounded-lg p-4 sm:p-6 min-h-[250px] text-lg">
-                        <h2 className="text-xl font-semibold text-white mb-4 border-b border-slate-700 pb-2">Результат:</h2>
-                        {history.map((line, index) => <p key={index} className="mb-3 text-slate-300">{line}</p>)}
-                        {transcription && <p className="text-slate-400 italic">{transcription}</p>}
-                        {!isRecording && history.length === 0 && !transcription && <p className="text-slate-500">Текст речи появится здесь...</p>}
-                    </div>
-                </div>
-            )
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+          audioContextRef.current.close();
+          audioContextRef.current = null;
         }
-        
-        function App() {
-            const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiApiKey'));
-            const [mode, setMode] = useState(null); // 'file' or 'live'
-
-            const handleKeySubmit = (key) => {
-                localStorage.setItem('geminiApiKey', key);
-                setApiKey(key);
-            };
-            
-            const handleResetKey = () => {
-                localStorage.removeItem('geminiApiKey');
-                setApiKey(null);
-                setMode(null);
-            }
-            
-            const ModeSelector = () => (
-                <div className="text-center">
-                    <h2 className="text-2xl font-bold text-white mb-6">Выберите режим</h2>
-                    <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                        <button onClick={() => setMode('file')} className="bg-sky-600 hover:bg-sky-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
-                            Загрузить файл
-                        </button>
-                        <button onClick={() => setMode('live')} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
-                            Использовать микрофон
-                        </button>
-                    </div>
-                </div>
-            );
-            
-            const ActiveComponent = () => {
-                switch(mode) {
-                    case 'file': return <FileTranscriber apiKey={apiKey} />;
-                    case 'live': return <LiveTranscriber apiKey={apiKey} />;
-                    default: return <ModeSelector />;
-                }
-            }
-
-            if (!apiKey) {
-                return <ApiKeyManager onKeySubmit={handleKeySubmit} />;
-            }
-
-            return (
-                <div className="bg-slate-800 p-6 sm:p-8 rounded-lg shadow-2xl w-full">
-                    <ActiveComponent />
-                    <div className="text-center mt-6 border-t border-slate-700 pt-4">
-                      <button onClick={mode ? () => setMode(null) : handleResetKey} className="text-sm text-slate-500 hover:text-sky-400">
-                        {mode ? '‹ Вернуться к выбору режима' : 'Сменить API ключ'}
-                      </button>
-                    </div>
-                </div>
-            );
+        if (shouldCloseSession && sessionRef.current) {
+          sessionRef.current.close();
+          sessionRef.current = null;
         }
-        
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<StrictMode><App /></StrictMode>);
+      };
 
-    </script>
+      useEffect(() => {
+        return () => { // Cleanup on component unmount
+          stopRecording();
+        };
+      }, []);
+
+      return (
+        <div className="w-full max-w-2xl p-8 bg-slate-800 rounded-lg shadow-xl">
+          <button onClick={onBack} className="mb-4 text-sky-400 hover:text-sky-300">&larr; Назад к выбору</button>
+          <h1 className="text-3xl font-bold mb-6 text-center text-white">Транскрибация с Микрофона</h1>
+          
+          <div className="flex justify-center space-x-4">
+            {!isRecording ? (
+              <button onClick={startRecording} className="bg-teal-600 hover:bg-teal-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
+                Начать Запись
+              </button>
+            ) : (
+              <button onClick={() => stopRecording()} className="bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-md transition-colors duration-300">
+                Остановить Запись
+              </button>
+            )}
+          </div>
+          
+          {error && <p className="mt-6 text-center text-red-400 bg-red-900/50 p-3 rounded-md">{error}</p>}
+          
+          <div className="mt-8 p-6 bg-slate-900 rounded-lg min-h-[150px]">
+            <h2 className="text-2xl font-bold mb-4 text-white">Транскрипция:</h2>
+            {isRecording && !transcription && <p className="text-slate-400 italic">Говорите в микрофон...</p>}
+            <p className="transcription-container text-slate-300">{transcription}</p>
+          </div>
+        </div>
+      );
+    };
+
+    // --- Main App Component ---
+    function App() {
+      const [apiKey, setApiKey] = useState(() => localStorage.getItem('geminiApiKey') || '');
+      const [mode, setMode] = useState(''); // '', 'file', 'live'
+
+      const handleKeySubmit = (key) => {
+        localStorage.setItem('geminiApiKey', key);
+        setApiKey(key);
+      };
+
+      const handleSelectMode = (selectedMode) => {
+        setMode(selectedMode);
+      };
+
+      const resetToModeSelection = () => {
+        setMode('');
+      };
+
+      const resetApiKey = () => {
+        localStorage.removeItem('geminiApiKey');
+        setApiKey('');
+        setMode('');
+      }
+
+      if (!apiKey) {
+        return <ApiKeyInput onKeySubmit={handleKeySubmit} />;
+      }
+
+      return (
+        <div className="relative w-full p-4">
+            {mode === '' && <ModeSelector onSelectMode={handleSelectMode} />}
+            {mode === 'file' && <FileTranscriber apiKey={apiKey} onBack={resetToModeSelection} />}
+            {mode === 'live' && <LiveTranscriber apiKey={apiKey} onBack={resetToModeSelection} />}
+            
+            <button onClick={resetApiKey} className="absolute top-4 right-4 text-xs text-slate-500 hover:text-slate-300">Сбросить ключ</button>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
 </body>
 </html>
