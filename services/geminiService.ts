@@ -1,18 +1,18 @@
-
 import { GoogleGenAI } from "@google/genai";
 
-// This is a placeholder for environments where the key is expected.
-// In the target runtime, it's assumed to be present and valid.
-const API_KEY = process.env.API_KEY;
+export const transcribeAudio = async (
+  base64Audio: string,
+  mimeType: string,
+  apiKey: string
+): Promise<string> => {
+  // Check if the API key is provided
+  if (!apiKey) {
+    throw new Error("API Key is required.");
+  }
 
-if (!API_KEY) {
-  console.warn("API_KEY is not set. The application will not work without it.");
-}
+  // Initialize the GenAI client with the provided key for each call
+  const ai = new GoogleGenAI({ apiKey });
 
-// Initialize with the API key. The exclamation mark asserts that API_KEY is non-null.
-const ai = new GoogleGenAI({ apiKey: API_KEY! });
-
-export const transcribeAudio = async (base64Audio: string, mimeType: string): Promise<string> => {
   try {
     const audioPart = {
       inlineData: {
@@ -26,16 +26,20 @@ export const transcribeAudio = async (base64Audio: string, mimeType: string): Pr
     };
 
     const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: { parts: [audioPart, textPart] },
+      model: 'gemini-2.5-flash',
+      contents: { parts: [audioPart, textPart] },
     });
-    
+
     return response.text;
   } catch (error) {
     console.error("Error during transcription:", error);
-    if (error instanceof Error) {
-        throw new Error(`Gemini API Error: ${error.message}`);
+    // Provide a more user-friendly error message
+    if (error instanceof Error && error.message.includes('API key not valid')) {
+        throw new Error(`Неверный API ключ. Пожалуйста, проверьте его и попробуйте снова.`);
     }
-    throw new Error("An unknown error occurred during transcription.");
+    if (error instanceof Error) {
+      throw new Error(`Ошибка Gemini API: ${error.message}`);
+    }
+    throw new Error("Произошла неизвестная ошибка во время транскрибации.");
   }
 };
